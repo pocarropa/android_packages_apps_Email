@@ -165,8 +165,9 @@ public class AccountServerSettingsActivity extends AccountSetupActivity implemen
     @Override
     public void onCheckSettingsSecurityRequired(String hostName) {
         dismissCheckSettingsFragment();
-        SecurityRequiredDialogFragment.newInstance(hostName)
-                .show(getFragmentManager(), SecurityRequiredDialogFragment.TAG);
+        //SecurityRequiredDialogFragment.newInstance(hostName)
+        //        .show(getFragmentManager(), SecurityRequiredDialogFragment.TAG);
+        onSecurityRequiredDialogResult(true);
     }
 
     @Override

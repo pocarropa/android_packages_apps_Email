@@ -1066,8 +1066,9 @@ public class AccountSetupFinal extends AccountSetupActivity
     @Override
     public void onCheckSettingsSecurityRequired(String hostName) {
         dismissCheckSettingsFragment();
-        final DialogFragment f = SecurityRequiredDialogFragment.newInstance(hostName);
-        f.show(getFragmentManager(), SecurityRequiredDialogFragment.TAG);
+        //final DialogFragment f = SecurityRequiredDialogFragment.newInstance(hostName);
+        //f.show(getFragmentManager(), SecurityRequiredDialogFragment.TAG);
+        onSecurityRequiredDialogResult(true);
     }
 
     @Override

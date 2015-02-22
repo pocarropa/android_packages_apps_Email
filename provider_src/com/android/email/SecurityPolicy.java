@@ -118,82 +118,6 @@ public class SecurityPolicy {
      */
     @VisibleForTesting
     Policy computeAggregatePolicy() {
-        boolean policiesFound = false;
-        Policy aggregate = new Policy();
-        aggregate.mPasswordMinLength = Integer.MIN_VALUE;
-        aggregate.mPasswordMode = Integer.MIN_VALUE;
-        aggregate.mPasswordMaxFails = Integer.MAX_VALUE;
-        aggregate.mPasswordHistory = Integer.MIN_VALUE;
-        aggregate.mPasswordExpirationDays = Integer.MAX_VALUE;
-        aggregate.mPasswordComplexChars = Integer.MIN_VALUE;
-        aggregate.mMaxScreenLockTime = Integer.MAX_VALUE;
-        aggregate.mRequireRemoteWipe = false;
-        aggregate.mRequireEncryption = false;
-
-        // This can never be supported at this time. It exists only for historic reasons where
-        // this was able to be supported prior to the introduction of proper removable storage
-        // support for external storage.
-        aggregate.mRequireEncryptionExternal = false;
-
-        Cursor c = mContext.getContentResolver().query(Policy.CONTENT_URI,
-                Policy.CONTENT_PROJECTION, null, null, null);
-        Policy policy = new Policy();
-        try {
-            while (c.moveToNext()) {
-                policy.restore(c);
-                if (DebugUtils.DEBUG) {
-                    LogUtils.d(TAG, "Aggregate from: " + policy);
-                }
-                aggregate.mPasswordMinLength =
-                    Math.max(policy.mPasswordMinLength, aggregate.mPasswordMinLength);
-                aggregate.mPasswordMode  = Math.max(policy.mPasswordMode, aggregate.mPasswordMode);
-                if (policy.mPasswordMaxFails > 0) {
-                    aggregate.mPasswordMaxFails =
-                        Math.min(policy.mPasswordMaxFails, aggregate.mPasswordMaxFails);
-                }
-                if (policy.mMaxScreenLockTime > 0) {
-                    aggregate.mMaxScreenLockTime = Math.min(policy.mMaxScreenLockTime,
-                            aggregate.mMaxScreenLockTime);
-                }
-                if (policy.mPasswordHistory > 0) {
-                    aggregate.mPasswordHistory =
-                        Math.max(policy.mPasswordHistory, aggregate.mPasswordHistory);
-                }
-                if (policy.mPasswordExpirationDays > 0) {
-                    aggregate.mPasswordExpirationDays =
-                        Math.min(policy.mPasswordExpirationDays, aggregate.mPasswordExpirationDays);
-                }
-                if (policy.mPasswordComplexChars > 0) {
-                    aggregate.mPasswordComplexChars = Math.max(policy.mPasswordComplexChars,
-                            aggregate.mPasswordComplexChars);
-                }
-                aggregate.mRequireRemoteWipe |= policy.mRequireRemoteWipe;
-                aggregate.mRequireEncryption |= policy.mRequireEncryption;
-                aggregate.mDontAllowCamera |= policy.mDontAllowCamera;
-                policiesFound = true;
-            }
-        } finally {
-            c.close();
-        }
-        if (policiesFound) {
-            // final cleanup pass converts any untouched min/max values to zero (not specified)
-            if (aggregate.mPasswordMinLength == Integer.MIN_VALUE) aggregate.mPasswordMinLength = 0;
-            if (aggregate.mPasswordMode == Integer.MIN_VALUE) aggregate.mPasswordMode = 0;
-            if (aggregate.mPasswordMaxFails == Integer.MAX_VALUE) aggregate.mPasswordMaxFails = 0;
-            if (aggregate.mMaxScreenLockTime == Integer.MAX_VALUE) aggregate.mMaxScreenLockTime = 0;
-            if (aggregate.mPasswordHistory == Integer.MIN_VALUE) aggregate.mPasswordHistory = 0;
-            if (aggregate.mPasswordExpirationDays == Integer.MAX_VALUE)
-                aggregate.mPasswordExpirationDays = 0;
-            if (aggregate.mPasswordComplexChars == Integer.MIN_VALUE)
-                aggregate.mPasswordComplexChars = 0;
-            if (DebugUtils.DEBUG) {
-                LogUtils.d(TAG, "Calculated Aggregate: " + aggregate);
-            }
-            return aggregate;
-        }
-        if (DebugUtils.DEBUG) {
-            LogUtils.d(TAG, "Calculated Aggregate: no policy");
-        }
         return Policy.NO_POLICY;
     }
 
@@ -317,84 +241,7 @@ public class SecurityPolicy {
      * is needed (typically, by the user) before the required security polices are fully active.
      */
     public int getInactiveReasons(Policy policy) {
-        // select aggregate set if needed
-        if (policy == null) {
-            policy = getAggregatePolicy();
-        }
-        // quick check for the "empty set" of no policies
-        if (policy == Policy.NO_POLICY) {
-            return 0;
-        }
-        int reasons = 0;
-        DevicePolicyManager dpm = getDPM();
-        if (isActiveAdmin()) {
-            // check each policy explicitly
-            if (policy.mPasswordMinLength > 0) {
-                if (dpm.getPasswordMinimumLength(mAdminName) < policy.mPasswordMinLength) {
-                    reasons |= INACTIVE_NEED_PASSWORD;
-                }
-            }
-            if (policy.mPasswordMode > 0) {
-                if (dpm.getPasswordQuality(mAdminName) < policy.getDPManagerPasswordQuality()) {
-                    reasons |= INACTIVE_NEED_PASSWORD;
-                }
-                if (!dpm.isActivePasswordSufficient()) {
-                    reasons |= INACTIVE_NEED_PASSWORD;
-                }
-            }
-            if (policy.mMaxScreenLockTime > 0) {
-                // Note, we use seconds, dpm uses milliseconds
-                if (dpm.getMaximumTimeToLock(mAdminName) > policy.mMaxScreenLockTime * 1000) {
-                    reasons |= INACTIVE_NEED_CONFIGURATION;
-                }
-            }
-            if (policy.mPasswordExpirationDays > 0) {
-                // confirm that expirations are currently set
-                long currentTimeout = dpm.getPasswordExpirationTimeout(mAdminName);
-                if (currentTimeout == 0
-                        || currentTimeout > policy.getDPManagerPasswordExpirationTimeout()) {
-                    reasons |= INACTIVE_NEED_PASSWORD;
-                }
-                // confirm that the current password hasn't expired
-                long expirationDate = dpm.getPasswordExpiration(mAdminName);
-                long timeUntilExpiration = expirationDate - System.currentTimeMillis();
-                boolean expired = timeUntilExpiration < 0;
-                if (expired) {
-                    reasons |= INACTIVE_NEED_PASSWORD;
-                }
-            }
-            if (policy.mPasswordHistory > 0) {
-                if (dpm.getPasswordHistoryLength(mAdminName) < policy.mPasswordHistory) {
-                    // There's no user action for changes here; this is just a configuration change
-                    reasons |= INACTIVE_NEED_CONFIGURATION;
-                }
-            }
-            if (policy.mPasswordComplexChars > 0) {
-                if (dpm.getPasswordMinimumNonLetter(mAdminName) < policy.mPasswordComplexChars) {
-                    reasons |= INACTIVE_NEED_PASSWORD;
-                }
-            }
-            if (policy.mRequireEncryption) {
-                int encryptionStatus = getDPM().getStorageEncryptionStatus();
-                if (encryptionStatus != DevicePolicyManager.ENCRYPTION_STATUS_ACTIVE) {
-                    reasons |= INACTIVE_NEED_ENCRYPTION;
-                }
-            }
-            if (policy.mDontAllowCamera && !dpm.getCameraDisabled(mAdminName)) {
-                reasons |= INACTIVE_NEED_CONFIGURATION;
-            }
-            // password failures are counted locally - no test required here
-            // no check required for remote wipe (it's supported, if we're the admin)
-
-            if (policy.mProtocolPoliciesUnsupported != null) {
-                reasons |= INACTIVE_PROTOCOL_POLICIES;
-            }
-
-            // If we made it all the way, reasons == 0 here.  Otherwise it's a list of grievances.
-            return reasons;
-        }
-        // return false, not active
-        return INACTIVE_NEED_ACTIVATION;
+        return 0;
     }
 
     /**
@@ -412,43 +259,6 @@ public class SecurityPolicy {
                 LogUtils.d(TAG, "setActivePolicies: none, remove admin");
             }
             dpm.removeActiveAdmin(mAdminName);
-        } else if (isActiveAdmin()) {
-            if (DebugUtils.DEBUG) {
-                LogUtils.d(TAG, "setActivePolicies: " + aggregatePolicy);
-            }
-            // set each policy in the policy manager
-            // password mode & length
-            dpm.setPasswordQuality(mAdminName, aggregatePolicy.getDPManagerPasswordQuality());
-            dpm.setPasswordMinimumLength(mAdminName, aggregatePolicy.mPasswordMinLength);
-            // screen lock time
-            dpm.setMaximumTimeToLock(mAdminName, aggregatePolicy.mMaxScreenLockTime * 1000);
-            // local wipe (failed passwords limit)
-            dpm.setMaximumFailedPasswordsForWipe(mAdminName, aggregatePolicy.mPasswordMaxFails);
-            // password expiration (days until a password expires).  API takes mSec.
-            dpm.setPasswordExpirationTimeout(mAdminName,
-                    aggregatePolicy.getDPManagerPasswordExpirationTimeout());
-            // password history length (number of previous passwords that may not be reused)
-            dpm.setPasswordHistoryLength(mAdminName, aggregatePolicy.mPasswordHistory);
-            // password minimum complex characters.
-            // Note, in Exchange, "complex chars" simply means "non alpha", but in the DPM,
-            // setting the quality to complex also defaults min symbols=1 and min numeric=1.
-            // We always / safely clear minSymbols & minNumeric to zero (there is no policy
-            // configuration in which we explicitly require a minimum number of digits or symbols.)
-            dpm.setPasswordMinimumSymbols(mAdminName, 0);
-            dpm.setPasswordMinimumNumeric(mAdminName, 0);
-            dpm.setPasswordMinimumNonLetter(mAdminName, aggregatePolicy.mPasswordComplexChars);
-            // Device capabilities
-            try {
-                // If we are running in a managed policy, it is a securityException to even
-                // call setCameraDisabled(), if is disabled is false. We have to swallow
-                // the exception here.
-                dpm.setCameraDisabled(mAdminName, aggregatePolicy.mDontAllowCamera);
-            } catch (SecurityException e) {
-                LogUtils.d(TAG, "SecurityException in setCameraDisabled, nothing changed");
-            }
-
-            // encryption required
-            dpm.setStorageEncryption(mAdminName, aggregatePolicy.mRequireEncryption);
         }
     }
 
@@ -677,12 +487,6 @@ public class SecurityPolicy {
      * return to the caller if there is an unexpected failure.  The wipe includes external storage.
      */
     public void remoteWipe() {
-        DevicePolicyManager dpm = getDPM();
-        if (dpm.isAdminActive(mAdminName)) {
-            dpm.wipeData(DevicePolicyManager.WIPE_EXTERNAL_STORAGE);
-        } else {
-            LogUtils.d(Logging.LOG_TAG, "Could not remote wipe because not device admin.");
-        }
     }
     /**
      * If we are not the active device admin, try to become so.
@@ -694,11 +498,7 @@ public class SecurityPolicy {
      * @return true if we are already active, false if we are not
      */
     public boolean isActiveAdmin() {
-        DevicePolicyManager dpm = getDPM();
-        return dpm.isAdminActive(mAdminName)
-                && dpm.hasGrantedPolicy(mAdminName, DeviceAdminInfo.USES_POLICY_EXPIRE_PASSWORD)
-                && dpm.hasGrantedPolicy(mAdminName, DeviceAdminInfo.USES_ENCRYPTED_STORAGE)
-                && dpm.hasGrantedPolicy(mAdminName, DeviceAdminInfo.USES_POLICY_DISABLE_CAMERA);
+        return true;
     }
 
     /**
